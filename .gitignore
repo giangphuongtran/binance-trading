@@ -1,0 +1,5 @@
+.env
+airflow.env
+logs/
+
+.venv/
