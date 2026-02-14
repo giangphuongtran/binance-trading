@@ -5,3 +5,7 @@
 
 - Created folder structure and Github repo
 - Created `docker-compose.yml`, `Makefile`, `.env`, `airflow.env`
+
+## 14-Feb-2026
+
+- Setup `./pipelines/common/settings.py`
