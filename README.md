@@ -1,247 +1,55 @@
-# **📊 Real-Time Market Surveillance Platform**
+# Binance → Postgres → Streamlit Labeler
 
-Event-driven market monitoring using Polygon.io, Kafka, Snowflake, dbt, and Airflow.
-
----
-
-## **🚀 Overview**
-
-This project implements a real-time market surveillance system designed to detect abnormal trading behavior using streaming market data.
-
-The platform ingests market data from Polygon.io, processes it through Kafka, applies real-time filtering and enrichment, and stores curated datasets in Snowflake for analytics and reporting using dbt.
-
-The system demonstrates a modern data architecture combining streaming, warehousing, and analytics engineering.
+Pipeline: download Binance futures (or Spot) data into Postgres, compute indicators, and label BUY/SELL/HOLD in a Streamlit UI.
 
 ---
 
-## **🎯 Use Case**
+## What’s in the repo
 
-The platform focuses on practical financial monitoring use cases:
-
-- Abnormal volume detection
-
-- Volatility spike monitoring
-
-- Price breakout and gap detection
-
-- News-driven risk alerts
-
-- Data quality and feed freshness monitoring
-
-This mirrors real-world surveillance systems used in financial institutions and fintech companies.
-
---- 
-
-## **🏗 Architecture**
-
-![](./docs/high_level_diagram.png)
-
-### **Components**
-
-**1️⃣ Data Source**
-
-Polygon.io provides:
-
-- 1-minute, 5-minute, hourly, and daily OHLCV bars
-
-- Real-time news events
-
-**2️⃣ Ingestion Layer**
-
-- Celery workers parallelize symbol ingestion and backfills.
-
-- Events are normalized and published to Kafka topics.
-
-**3️⃣ Streaming Layer**
-
-Kafka topics:
-
-- `polygon.bars.raw`
-
-- `polygon.news.raw`
-
-- `market.alerts`
-
-- `market.metrics`
-
-Streaming processor:
-
-- Filters noise
-
-- Detects anomalies
-
-- Aggregates rolling metrics
-
-- Routes alerts
-
-**4️⃣ Warehouse Layer (Snowflake)**
-
-Schemas:
-
-- `raw` – filtered streaming events
-
-- `staging` – cleaned and typed views
-
-- `analytics` – SCD2 dimensions and fact tables
-
-**5️⃣ Transformation Layer (dbt)**
-
-dbt builds:
-
-- Dimension tables (SCD2)
-
-- Fact tables (alerts, intraday metrics)
-
-- Aggregated reporting tables
-
-- Data quality tests
-
-**6️⃣ Orchestration**
-
-Airflow orchestrates:
-
-- Backfills
-
-- Batch transformations
-
-- Snapshot jobs
-
-- Quality checks
-
-## **📂 Repository Structure**
-```
-.
-├── docker-compose.yml
-├── Makefile
-├── airflow.env
-├── dags/
-├── streaming/
-│   ├── polygon_producer.py
-│   ├── stream_processor.py
-├── dbt_project/
-│   ├── models/
-│   ├── snapshots/
-├── config/
-├── utils/
-└── README.md
-```
-## **🔧 Technology Stack**
-
-| Layer	             | Technology                                    |
-|--------------------|-----------------------------------------------|
-| Source	            | Polygon.io                                    |
-| Streaming          | 	Apache Kafka                                 |
-| Stream Processing	 | Spark Structured Streaming or Python consumer |
-| Warehouse          | 	Snowflake                                    |
-| Transformation     | 	dbt                                          |
-| Orchestration      | 	Apache Airflow                               |
-| Task Distribution	 | Celery + Redis                                |
-|Database (Infra)	| PostgreSQL|
+- **scripts/download_btcusdt_futures_klines.py** — Bulk download Binance futures klines (1m, 5m, 15m, 1h) into `market.futures_candles`.
+- **pipelines/ingestion/** — Binance Spot REST backfill and WebSocket live feed → `market.candles_raw`.
+- **pipelines/features/** — Load candles from Postgres, add technical indicators (RSI, ATR, MACD, Bollinger, etc.).
+- **app/streamlit_labeler.py** — Load candles + indicators, click candles to label BUY/SELL/HOLD with optional SL/TP (1× and 1.5× ATR); labels stored in `market.trade_labels`.
+- **sql/001_create_market_tables.sql** — Schema for candles, metadata, and labels (all use `open_time` / `close_time` as `timestamptz`).
 
 ---
 
-## **📈 Example Alert Rules**
+## Config
 
-**Abnormal Volume**
+Set in `.env` (or export):
 
-Trigger alert when: Current Volume > 3 × Rolling 20-period average volume
-
-**Volatility Spike**
-
-Trigger alert when: Rolling Standard Deviation > Historical 95th percentile
-
-**News Impact**
-
-Trigger alert when: Negative sentiment + Abnormal volume within 10 minutes
+- **POSTGRES_DSN** — e.g. `postgresql://user:pass@localhost:5432/trading`
+- **SYMBOLS** — e.g. `BTCUSDT,ETHUSDT` (used by download script and Spot ingestion)
+- **INTERVALS** — e.g. `1h` (Spot only; futures script uses 1m, 5m, 15m, 1h)
+- **MARKET_TYPE** — `um` or `cm` (for Streamlit / futures)
+- **SYMBOL** — Default symbol for Streamlit (e.g. `BTCUSDT`)
+- **BINANCE_USE_TESTNET** — `false` for production
 
 ---
 
-## **🗄 Snowflake Data Model**
-**RAW Layer**
+## Getting started
 
-- `raw_bars`
+1. **Postgres** (e.g. via Docker):
+   ```bash
+   make up
+   # Set POSTGRES_DSN in .env to match (user, pass, db from docker-compose)
+   ```
 
-- `raw_news`
+2. **Schema** (once):
+   ```bash
+   make schema
+   # or: psql "$POSTGRES_DSN" -f sql/001_create_market_tables.sql
+   ```
 
-- `raw_alerts`
+3. **Futures data:**
+   ```bash
+   make download
+   ```
 
-- `raw_metrics`
+4. **Labeling UI:**
+   ```bash
+   make streamlit
+   # or: streamlit run app/streamlit_labeler.py
+   ```
 
-**STAGING Layer**
-
-- `stg_bars`
-
-- `stg_news`
-
-**ANALYTICS Layer**
-
-- `dim_instruments`
-
-- `dim_market_sessions`
-
-- `fact_intraday_metrics`
-
-- `fact_alerts`
-
-# Getting Started
-1. Generate Fernet key
-```bash
-make fernet
-```
-
-2. Start infrastructure
-```bash
-docker compose up -d --build
-```
-
-3. Access Services
-
-Airflow UI: http://localhost:8080
-
-AKHQ (Kafka UI): http://localhost:8088
-
-**Environment Variables**
-
-Two environment files are required:
-
-`.env`
-
-- Postgres credentials
-
-- Snowflake credentials
-
-- Airflow metadata DB credentials
-
-`airflow.env`
-
-- Executor configuration
-
-- Broker URL
-
-- Fernet key
-
-# **📊 What This Project Demonstrates**
-
-- Event-driven architecture
-
-- Real-time stream processing
-
-- Modern data warehouse modeling
-
-- SCD2 implementation in dbt
-
-- Infrastructure separation (app DB vs orchestration DB)
-
-- Production-style containerized deployment
-
-**📌 Future Enhancements**
-
-- Real-time Slack or webhook alerting
-
-- Feature store integration
-
-- Backtesting framework
-
-- CI/CD pipeline for dbt models
-
-- Monitoring with Prometheus and Grafana
+Optional: Spot backfill `python -m pipelines.ingestion.binance_rest`; live Spot candles `python -m pipelines.ingestion.binance_ws`.

@@ -1,11 +1,5 @@
-## 13-Feb-2026
-- Planned high-level architecture
+# Progress
 
-![Architecture Overview](./docs/high_level_diagram.png)
-
-- Created folder structure and Github repo
-- Created `docker-compose.yml`, `Makefile`, `.env`, `airflow.env`
-
-## 14-Feb-2026
-
-- Setup `./pipelines/common/settings.py`
+- **Current scope:** Binance (Futures bulk + Spot REST/WS) → Postgres → Streamlit labeler (BUY/SELL/HOLD + SL/TP).
+- **Removed:** Airflow, Kafka, Snowflake, Polygon, streaming/warehouse pipelines; project trimmed to data + labeling only.
+- **Next (optional):** ML training on labels, backtesting, live/paper trading.

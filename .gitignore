@@ -1,5 +1,9 @@
 .env
-airflow.env
+*.env
+!*.env.example
 logs/
-
 .venv/
+__pycache__/
+*.pyc
+*.pyo
+.idea/

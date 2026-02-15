@@ -1,22 +1,19 @@
-AIRFLOW_ENV=airflow.env
+# Binance → Postgres → Streamlit labeler
 
-.PHONY: fernet
+.PHONY: up down schema download streamlit
 
-fernet:
-	@if [ ! -f $(AIRFLOW_ENV) ]; then \
-		echo "$(AIRFLOW_ENV) not found"; \
-		exit 1; \
-	fi; \
-	if grep -q '^AIRFLOW__CORE__FERNET_KEY=' $(AIRFLOW_ENV) && \
-	   [ -n "$$(grep '^AIRFLOW__CORE__FERNET_KEY=' $(AIRFLOW_ENV) | cut -d '=' -f2)" ]; then \
-		echo "Fernet key already set in $(AIRFLOW_ENV)"; \
-	else \
-		echo "Generating Fernet key..."; \
-		KEY=$$(python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"); \
-		if grep -q '^AIRFLOW__CORE__FERNET_KEY=' $(AIRFLOW_ENV); then \
-			sed -i "s|^AIRFLOW__CORE__FERNET_KEY=.*|AIRFLOW__CORE__FERNET_KEY=$$KEY|" $(AIRFLOW_ENV); \
-		else \
-			echo "AIRFLOW__CORE__FERNET_KEY=$$KEY" >> $(AIRFLOW_ENV); \
-		fi; \
-		echo "Fernet key written to $(AIRFLOW_ENV)"; \
-	fi
+up:
+	docker compose up -d postgres
+
+down:
+	docker compose down
+
+# Run after first up: create market schema and tables
+schema:
+	psql "$${POSTGRES_DSN}" -f sql/001_create_market_tables.sql
+
+download:
+	python scripts/download_btcusdt_futures_klines.py
+
+streamlit:
+	streamlit run app/streamlit_labeler.py
