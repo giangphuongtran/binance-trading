@@ -80,16 +80,23 @@ def _read_zip_csv(zip_bytes: bytes) -> pd.DataFrame:
 
 
 def _normalize_timestamps_to_ms(df: pd.DataFrame) -> pd.DataFrame:
-    # Some newer datasets may be microseconds; normalize to ms.
-    # If open_time looks like 16 digits (>= 10^15), treat as microseconds.
-    # If it's 13 digits (~10^12-10^13), it's ms already.
+    # Drop header row if present (some Binance CSVs have "open_time", "open", ... as first line)
+    if "open_time" in df.columns:
+        df["open_time"] = pd.to_numeric(df["open_time"], errors="coerce")
+    if "close_time" in df.columns:
+        df["close_time"] = pd.to_numeric(df["close_time"], errors="coerce")
+    # Keep only rows where both timestamps are numeric
+    mask = df["open_time"].notna() if "open_time" in df.columns else pd.Series(True, index=df.index)
+    if "close_time" in df.columns:
+        mask = mask & df["close_time"].notna()
+    df = df.loc[mask].copy()
     for col in ["open_time", "close_time"]:
         if col in df.columns:
-            v = df[col].dropna()
-            if not v.empty and int(v.iloc[0]) >= 10**15:
-                df[col] = (df[col] // 1000).astype("int64")
-            else:
-                df[col] = df[col].astype("int64")
+            df[col] = df[col].astype("int64")
+    # Normalize: if values are microseconds (>= 10^15), convert to ms
+    for col in ["open_time", "close_time"]:
+        if col in df.columns and len(df) > 0 and df[col].iloc[0] >= 10**15:
+            df[col] = (df[col] // 1000).astype("int64")
     return df
 
 
@@ -168,6 +175,27 @@ def upsert_klines(conn: psycopg.Connection, market_type: str, symbol: str, inter
     return len(df)
 
 
+def get_last_ingested_date(market_type: str, symbol: str, interval: str) -> Optional[date]:
+    """Return the date of last_open_time from metadata, or None if never ingested."""
+    with psycopg.connect(POSTGRES_DSN) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT last_open_time FROM market.futures_ingestion_metadata
+                WHERE market_type = %s AND symbol = %s AND interval = %s
+                """,
+                (market_type, symbol, interval),
+            )
+            row = cur.fetchone()
+    if not row or row[0] is None:
+        return None
+    # last_open_time is timestamptz (candle open); convert to date in UTC
+    ts = row[0]
+    if hasattr(ts, "date"):
+        return ts.date()
+    return date(ts.year, ts.month, ts.day)
+
+
 def download_range(
     market_type: str,
     symbol: str,
@@ -211,11 +239,18 @@ def download_range(
 
 
 if __name__ == "__main__":
-    # Set a wide range; it will auto-skip missing files
-    start = date(2019, 1, 1)
+    default_start = date(2019, 1, 1)
     end = date.today() - timedelta(days=1)
 
     for symbol in SYMBOLS:
         for itv in INTERVALS:
             print(f"\n=== Downloading {symbol} {MARKET_TYPE} {itv} ===")
-            download_range(MARKET_TYPE, symbol, itv, start, end, prefer_monthly=False)
+            # Resume from last ingested date + 1 if we have metadata
+            last = get_last_ingested_date(MARKET_TYPE, symbol, itv)
+            start = (last + timedelta(days=1)) if last else default_start
+            if last:
+                print(f"Resuming from {start} (last ingested: {last})")
+            if start <= end:
+                download_range(MARKET_TYPE, symbol, itv, start, end, prefer_monthly=False)
+            else:
+                print(f"Already up to date (last: {last}, end: {end}).")
