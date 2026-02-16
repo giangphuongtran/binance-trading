@@ -19,6 +19,48 @@ def _normalize_open_time(dt) -> datetime:
     return dt
 
 
+def get_candle_date_range(
+    dsn: str,
+    market_type: str,
+    symbol: str,
+    interval: str,
+    *,
+    table: str = "futures_candles",
+) -> tuple[date | None, date | None]:
+    """
+    Return the min/max open_time (as dates) available in Postgres
+    for the given market / symbol / interval.
+    """
+    if table == "futures_candles":
+        sql = """
+            SELECT MIN(open_time) AS min_time, MAX(open_time) AS max_time
+            FROM market.futures_candles
+            WHERE market_type = %(market_type)s
+              AND symbol = %(symbol)s
+              AND interval = %(interval)s
+        """
+        params = {"market_type": market_type, "symbol": symbol, "interval": interval}
+    else:
+        sql = """
+            SELECT MIN(open_time) AS min_time, MAX(open_time) AS max_time
+            FROM market.candles_raw
+            WHERE exchange = %(exchange)s
+              AND symbol = %(symbol)s
+              AND interval = %(interval)s
+        """
+        params = {"exchange": market_type, "symbol": symbol, "interval": interval}
+
+    with psycopg.connect(dsn) as conn:
+        df = pd.read_sql(sql, conn, params=params)
+
+    if df.empty or df["min_time"].isna().all() or df["max_time"].isna().all():
+        return None, None
+
+    min_ts = pd.to_datetime(df["min_time"].iloc[0], utc=True)
+    max_ts = pd.to_datetime(df["max_time"].iloc[0], utc=True)
+    return min_ts.date(), max_ts.date()
+
+
 def load_candles(
     dsn: str,
     market_type: str,

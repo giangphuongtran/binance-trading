@@ -12,7 +12,7 @@ _root = Path(__file__).resolve().parents[1]
 if str(_root) not in sys.path:
     sys.path.insert(0, str(_root))
 
-from pipelines.features.load_from_pg import load_candles
+from pipelines.features.load_from_pg import load_candles, get_candle_date_range
 from pipelines.features.indicators import add_indicators
 from pipelines.common.settings import require, POSTGRES_DSN
 
@@ -27,9 +27,20 @@ interval = st.sidebar.selectbox("Interval", ["1m", "5m", "15m", "30m", "1h"], in
 # Load by date range (calendar) or last N days or raw candle count
 CANDLES_PER_DAY = {"1m": 1440, "5m": 288, "15m": 96, "30m": 48, "1h": 24}
 MAX_CANDLES = 30_000  # cap so Streamlit stays responsive
+
+# Look up min/max dates actually available in Postgres for this market/symbol/interval
+min_date, max_date = get_candle_date_range(POSTGRES_DSN, market_type, symbol, interval)
 today = date.today()
-default_end = today
-default_start = today - timedelta(days=7)
+if max_date is None:
+    # Fallback to "today" if we don't yet have any data
+    max_date = today
+if min_date is None:
+    # Fallback to 365 days back if we don't yet have any data
+    min_date = max_date - timedelta(days=365)
+
+# Default range: last 7 days within the available window
+default_end = min(max_date, today)
+default_start = max(min_date, default_end - timedelta(days=7))
 
 load_mode = st.sidebar.radio("Load data by", ["Date range (calendar)", "Last N days", "Candle count"], horizontal=False)
 use_date_range = False
@@ -38,9 +49,21 @@ limit = 5000
 if load_mode == "Date range (calendar)":
     col1, col2 = st.sidebar.columns(2)
     with col1:
-        start_date = st.date_input("Start date", value=default_start, key="start_date")
+        start_date = st.date_input(
+            "Start date",
+            value=default_start,
+            min_value=min_date,
+            max_value=max_date,
+            key="start_date",
+        )
     with col2:
-        end_date = st.date_input("End date", value=default_end, key="end_date")
+        end_date = st.date_input(
+            "End date",
+            value=default_end,
+            min_value=min_date,
+            max_value=max_date,
+            key="end_date",
+        )
     if start_date > end_date:
         st.sidebar.warning("Start must be ≤ end. Using end as start.")
         start_date = end_date
